@@ -1,0 +1,11 @@
+.idea
+__pycache__/
+*.plk
+*.png
+*.html
+*.pyc
+*.db
+*.pickle
+*.csv
+
+
