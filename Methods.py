@@ -28,34 +28,48 @@ from utilities import DataPoints
                   found in the corresponding frame.
     intervalse: array with start and stop for frame intervals
 '''
-def __GetClustersFromFrames__(M, n, timeOverlap, nFrames, eps, min_samples, variable):
+def __GetClustersFromFrames__(M, n, timeOverlap, nFrames, eps, min_samples, variableValues):
 
     intervals = Modules.np.zeros([nFrames, 2])
     covlen = int(n/(nFrames-(nFrames-1)*timeOverlap))
     frameClusters = []
+    OUTLIERS = DataPoints.Points()
     for i in range(0, len(M[0, :]), 1):
-        M[:, i] = M[:, i] / Modules.np.std(M[:, i])
+        M[:,i] = M[:,i]/Modules.np.std(M[:,i])
+        #M[:, i] = (M[:, i]-Modules.np.multiply(Modules.np.ones(len(M[:,i])), Modules.np.mean(M[:,i]))) / Modules.np.std(M[:, i])
     for i in range(0, nFrames, 1):
         frm2 = int(-covlen * i + timeOverlap*covlen * i)
         to2 = frm2 - covlen
         intervals[i,0] = to2
         intervals[i,1] = frm2
         dataPoints = DataPoints.Points()
-        dataPoints.__DataToPoints__(M, to2, frm2) #Frm2 is closest in time
+        dataPoints.__dataToPoints__(M, to2, frm2) #Frm2 is closest in time
+        variableValuesTMP = variableValues[len(variableValues) + to2:len(variableValues) + frm2]
+        for j in range(0, len(dataPoints.pList), 1):
+            dataPoints.pList[j].value = variableValuesTMP[len(variableValuesTMP)- j - 1]
         clusters, labelArray, ntot, outliers = __ClusterDBSCAN__(points=dataPoints, eps=eps, min_samples=min_samples)
-        temp = clusters.__getKernelsList__()
-        clusters.kernels = temp
+        '''IF NO CLUSTERS ARE FOUND WE HAVE TO BE CAREFUL! FIX THIS TMRW!!! '''
+        for j in range(0, len(outliers.pList), 1):
+            OUTLIERS.__add__(outliers.pList[j])
+        if ntot != 0:
+            temp = clusters.__getKernelsList__()
+            clusters.kernels = temp
 
-        for j in range(0, len(clusters.groupArray), 1): #values are set here, move this pls
-            clusters.groupArray[j].val = i+1
+            '''for j in range(0, len(clusters.groupArray), 1): #values are set here, move this pls
+                clusters.groupArray[j].val = i+1'''
 
-        frameClusters.append(clusters)
-        print("FRAME " + str(nFrames-(i + 1)) + ": INTERVAL: " + str(to2) + " TO " + str(frm2) +
-              ", HAS " + str(len(labelArray[0])) + " PTS, "
-              + str(len(clusters.groupArray)) + " CLUSTERS")
+            frameClusters.append(clusters)
+
+            '''print("FRAME " + str(nFrames - (i)) + ": INTERVAL: " + str(to2) + " TO " + str(frm2) +
+                  ", HAS " + "     P:" + str(len(labelArray[0]))
+                  + "     O: " + str(len(outliers.pList)) + "     C: " + str(len(clusters.groupArray)))'''
+            print("FRAME " + str(nFrames - (i)) + ": " + "     P: " + str(len(labelArray[0]))
+                  + "     O: " + str(len(outliers.pList)) + "     C: " + str(len(clusters.groupArray)))
+        else:
+            frameClusters.append([])
+            print("FRAME " + str(nFrames-(i+1)) + ": INTERVAL " + str(to2) + " TO " + str(frm2) + " HAS NO CLUSTERS")
     frameClusters = frameClusters[::-1]
-
-    return frameClusters, intervals
+    return frameClusters, intervals, OUTLIERS
 
 
 
@@ -80,6 +94,8 @@ def __ClusterDBSCAN__(points, eps, min_samples):
         X = []
         posMat = points.__getPosMat__()
         X = Modules.StandardScaler().fit_transform(posMat)
+        #dist = Modules.DistanceMetric.get_metric('euclidean')
+        #db = Modules.DBSCAN(eps=eps, min_samples=min_samples, metric=dist).fit(X)
         db = Modules.DBSCAN(eps=eps, min_samples=min_samples).fit(X)
         core_samples_mask = Modules.np.zeros_like(db.labels_, dtype=bool)
         core_samples_mask[db.core_sample_indices_] = True
@@ -119,6 +135,30 @@ def __CompareKernels__(frameClusters):
                 tmp = Modules.np.linalg.norm(Modules.np.subtract(frameClusters[i].kernels[j]
                                                                  , frameClusters[i-1].kernels[k]))
                 EVTMP[j, k] = tmp
+        EVOLUTION.append(EVTMP)
+    return EVOLUTION
+
+def __CompareKernelsFIX__(frameClusters):
+    EVOLUTION = []
+    Modules.pdb.set_trace()
+    run = False
+    if frameClusters[0] != []:
+        run = True
+
+    for i in range(1, len(frameClusters), 1):
+        if frameClusters[i] != [] and run == True:
+            Modules.pdb.set_trace()
+            EVTMP = Modules.np.zeros([len(frameClusters[i].kernels),len(frameClusters[i-1].kernels)])
+            for j in range(0, len(frameClusters[i].kernels), 1):
+                for k in range(0, len(frameClusters[i-1].kernels), 1):
+                    tmp = Modules.np.linalg.norm(Modules.np.subtract(frameClusters[i].kernels[j]
+                                                                     , frameClusters[i-1].kernels[k]))
+                    EVTMP[j, k] = tmp
+        else:
+            run = False
+            if frameClusters[i] != []:
+                run = True
+            EVTMP = []
         EVOLUTION.append(EVTMP)
     return EVOLUTION
 
@@ -195,6 +235,7 @@ def __Connections__(EVOLUTION, tolerance):
     FRAMENODES: Nodes within each frame
 '''
 def __MakeFrameGraphs__(evo, con, indx, frameClusters):
+
     NODES = []
     FRAMENODES = []
     FRAMEEDGES = []
@@ -204,12 +245,15 @@ def __MakeFrameGraphs__(evo, con, indx, frameClusters):
     FRAMEWIDTH = []
     WINDOWWIDTH = []
 
+
+    #Creates values and sizes
     for i in range(0, len(frameClusters), 1):
         for j in range(0, len(frameClusters[i].groupArray)):
             SIZES.append(len(frameClusters[i].groupArray[j].pList))
             VALUES.append(frameClusters[i].groupArray[j].__getValue__())
 
-    #THIS PART CREATES NODES
+
+    #Creates nodes
     for i in range(0, len(evo), 1):
         if i == 0:
             tmp = Modules.np.zeros(len(evo[0][0]))
@@ -224,7 +268,8 @@ def __MakeFrameGraphs__(evo, con, indx, frameClusters):
             NODES.append(NODES[len(NODES)-1]+1)
         FRAMENODES.append(tmp2)
 
-    #EDGES IN FRAMES
+
+    #Finds edges in frames
     for i in range(0, len(con), 1):
         tmp = []
         tmp2 = []
@@ -236,9 +281,10 @@ def __MakeFrameGraphs__(evo, con, indx, frameClusters):
         FRAMEWIDTH.append(tmp2)
         FRAMEEDGES.append(tmp)
 
+
+    # Finds edges in windows
     WINDOWNODES = []
     out = indx[len(indx)-1][1]
-    #EDGES IN WINDOWS
     for i in range(0, len(indx), 1):
         tmp = []
         tmp2 = []
@@ -251,13 +297,13 @@ def __MakeFrameGraphs__(evo, con, indx, frameClusters):
         WINDOWNODES = []
 
 
+    #Finds nodes in windows
     for i in range(0, len(indx), 1):
         tmp = []
         for j in range(indx[i][0], indx[i][1]+1, 1):
             for k in range(0, len(FRAMENODES[j]), 1):
                 tmp.append(int(FRAMENODES[j][k]))
         WINDOWNODES.append(tmp)
-
     return NODES, WINDOWNODES, WINDOWEDGES, WINDOWWIDTH, SIZES, VALUES, FRAMENODES
 
 
@@ -274,11 +320,14 @@ def __graphColorAssignment__(nodes, values):
         clusters is abit of a hassle. It includes adding together multiple lists of colors, removing colors from the list
         that are not compatible with the networkx draw fcn and lastly actually assigning colors to the clusters//nodes based
         on which percentile of the value we look at it is in.'''
+
+
     intervals = 99
     intThird = 33
     breaks = Modules.np.zeros(intervals)
     for i in range(0, intervals, 1):
         breaks[i] = Modules.np.percentile(values, int(100 / intervals * i))
+
 
     from1 = Modules.Color("#a100ff")
     to1 = Modules.Color("#00a9ff")
@@ -288,11 +337,14 @@ def __graphColorAssignment__(nodes, values):
     colors.extend(list(to1.range_to(to2, intThird)))
     colors.extend(list(to2.range_to(to3, intThird)))
     colors_tmp = []
+
+
     for i in range(0, len(colors), 1):
         colors_tmp.append(str(colors[i]))
     for i in range(0, len(colors_tmp), 1):
         if len(colors_tmp[i]) < 5:
             colors_tmp[i] = colors_tmp[Modules.np.abs(i - 1)]
+
 
     colors_sorted = []
     for i in range(0, len(nodes), 1):
@@ -322,8 +374,11 @@ def __graphColorAssignment__(nodes, values):
     clrs: colors for nodes in certian window
 '''
 def __GraphProperties__(wndtmp, szstmp, clrstmp):
+
     szs = []
     clrs = []
+
+
     for i in range(0, len(wndtmp), 1):
         tmp1 = []
         tmp2 = []
@@ -332,6 +387,7 @@ def __GraphProperties__(wndtmp, szstmp, clrstmp):
             tmp2.append(clrstmp[j])
         szs.append(tmp1)
         clrs.append(tmp2)
+
     return szs, clrs
 
 
@@ -349,6 +405,7 @@ def __GraphProperties__(wndtmp, szstmp, clrstmp):
     none, but plots graphs
 '''
 def __MakeGraphs__(edg, wnd, wdth, szs, clrs, lbls):
+
     for i in range(len(wnd)-1, -1, -1):
         Modules.mp.figure()
         G = Modules.nx.Graph()
@@ -358,6 +415,7 @@ def __MakeGraphs__(edg, wnd, wdth, szs, clrs, lbls):
         sizes = Modules.np.add(Modules.np.multiply(szs[i], .4), Modules.np.ones(len(szs[i])) * 50)  # resizers
         width = 1/(Modules.np.multiply(0.3, wdth[i])+Modules.np.multiply(.1, Modules.np.ones(len(wdth[i]))))
         Modules.nx.draw(G, with_labels=lbls, node_size=sizes, pos=pos, alpha=0.6, node_color=clrs[i], width=width)
+        Modules.mp.savefig(r'C:\Users\arvid\Desktop\TDA\PlotSaves\100fig shows split\Plot{}.png'.format(i))
 
 
 
@@ -370,63 +428,46 @@ def __MakeGraphs__(edg, wnd, wdth, szs, clrs, lbls):
     returns:
     kernel: the kernel corresponding to the node which was specified in the input
 '''
-def __getClusterKernel__(node, frameClusters, frameNodes):
+def __getClusterFromNode__(frameClusters, frameNodes, node):
+
     frame = 0
     frameIndx = 0
+
     for i in range(0, node, 1):
         if frameIndx == len(frameClusters[frame].groupArray):
             frameIndx = 0
             frame = frame + 1
         if frameNodes[frame][frameIndx] == node:
-            Modules.pdb.set_trace()
-            return frameClusters[frame].groupArray[frameIndx].__getKernel__()
+            return frameClusters[frame].groupArray[frameIndx]
         frameIndx = frameIndx + 1
+
     return "Node not found"
 
+def __windowIntervals__(indx, intervals):
+    print()
+    for i in range(0, len(indx), 1):
+        frm = intervals[len(intervals)-1-indx[i][0]][0]
+        to = intervals[len(intervals)-1-indx[i][1]][1]
+        print("WINDOW " + str(i+1) + " COVERS THE INTERVAL: " + str(frm) + " TO " + str(to))
 
+def __PlotCovers__(intervals, A):
+    Modules.mp.figure()
+    Modules.mp.plot(A[:, 0])
+    Modules.mp.plot(A[:, 1])
+    Modules.mp.plot(A[:, 2])
+    Modules.mp.plot(A[:, 3])
+    Modules.mp.plot(A[:, 4])
+    Modules.mp.plot(A[:, 5])
+    Modules.mp.plot(A[:, 6])
+    Modules.mp.plot(A[:, 7])
+    Modules.mp.plot(A[:, 8])
+    Modules.mp.plot(A[:, 9])
 
-
-
-
-
-
-def __ClusterDBSCANOLD__(groups, eps, min_samples):
-    # Clusters the points in the covers with DPSCAN, params are eps, min_samples
-    # Also plots the clusters in different colors and saves clusters in array as "points" objects
-    Modules.pdb.set_trace()
-    clusters = DataPoints.Groups()
-    outliers = DataPoints.Points()
-    labelsArray = []
-    ntot = 0
-    #print("Cover nr:, points: and clusters:")
-    for o in range(0, len(groups.groupArray), 1):
-        pointsIndex = o
-        if isinstance(groups.groupArray[o].__getPosMat__(), Modules.numbers.Number) == False:
-            X = []
-            posMat = groups.groupArray[o].__getPosMat__()
-            X = Modules.StandardScaler().fit_transform(posMat)
-            # mp.title('Clusters from DBSCAN, fr. cover ' + str(o + 1))
-
-            db = Modules.DBSCAN(eps=eps, min_samples=min_samples).fit(X)
-            core_samples_mask = Modules.np.zeros_like(db.labels_, dtype=bool)
-            core_samples_mask[db.core_sample_indices_] = True
-            labels = db.labels_
-            labelsArray.append(labels)
-            n_clusters_ = len(set(labels)) - (1 if -1 in labels else 0)
-            #print(str(o + 1) + "    " + str(len(groups.groupArray[o].pList)) + "    " + str(n_clusters_))
-            ntot = ntot + n_clusters_
-            for i in range(-1, n_clusters_, 1):
-                pointsTmp = DataPoints.Points(pointsIndex=pointsIndex)
-                for j in range(0, len(labels) - 1, 1):
-                    if labels[j] == i:
-                        pointsTmp.__add__((groups.groupArray[o].pList[j]))
-                if i != -1:
-                    clusters.__add__(pointsTmp)
-                else:
-                    for k in range(0, len(pointsTmp.pList), 1):
-                        outliers.__add__(pointsTmp.pList[k])
-    return clusters, labelsArray, ntot, outliers
-
+    for i in range(0, len(intervals), 1):
+        Modules.mp.plot([-intervals[i][0], -intervals[i][1]],
+                        [Modules.np.mean(A[:, 0]) - 10 + i * 2, Modules.np.mean(A[:, 0]) - 10 + i * 2], 'ro-')
+    Modules.mp.show()
+    Modules.mp.figure()
 
 
 

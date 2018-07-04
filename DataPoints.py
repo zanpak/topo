@@ -20,6 +20,9 @@ class Point:
         self.pos = pos
         self.value = []
 
+    def __dist__(self, other): #THIS USES EUCLIDIAN
+        return Modules.np.linalg.norm(Modules.np.subtract(self.pos, other.pos))
+
 
 
 '''
@@ -42,7 +45,7 @@ class Points:
         self.kernel = []
         self.val = []
 
-    def __DataToPoints__(self, M, frm, to):
+    def __dataToPoints__(self, M, frm, to):
         M = M[len(M) + frm:len(M) + to][:]  # here we assume that we want to use the points up until the last timestamp, fix later
 
         for i in range(0, len(M[:, 0]), 1):
@@ -52,7 +55,6 @@ class Points:
 
     def __add__(self, p):
         self.pList.append(p)
-
 
     def __getPosMat__(self):
 
@@ -74,6 +76,9 @@ class Points:
     def __getKernel__(self):
         return Modules.np.mean(self.__getPosMat__(), 0)
 
+    def __dist__(self, other): #THIS USES EUCLIDIAN
+        return Modules.np.linalg.norm(Modules.np.subtract(self.__getKernel__(), other.__getKernel__()))
+
 
 
 '''
@@ -89,6 +94,7 @@ class Points:
     __getKernelsList__: returns array with kernels for groups
 '''
 class Groups:
+
     def __init__(self):
         self.groupArray = []
         self.kernels = []
